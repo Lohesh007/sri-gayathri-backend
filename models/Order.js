@@ -23,8 +23,11 @@ const orderSchema = new mongoose.Schema({
   customerName: { type: String },        // auto filled from user.username
   mobile: { type: String },              // auto filled from user.mobile
   address: { type: String },             // auto filled from user.address
-
-  status: { type: String, default: "Pending" }, 
+  deliveryInstructions: { type: String }, // User custom notes for delivery
+  
+  status: { type: String, default: "Pending" },
+  razorpayOrderId: { type: String },
+  razorpayPaymentId: { type: String, unique: true, sparse: true },
   createdAt: { type: Date, default: Date.now },
 });
 

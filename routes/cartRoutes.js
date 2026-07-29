@@ -1,16 +1,31 @@
 const express = require("express");
 const router = express.Router();
 const Cart = require("../models/Cart");
+const Product = require("../models/Product");
 
 // ⭐ Only one import needed
 const authenticate = require("../middleware/authMiddleware");
 
 // Add to cart
 router.post("/add", authenticate, async (req, res) => {
-  const { productId, name, price, image } = req.body;
+  const { productId, name, image, quantity } = req.body;
   const userId = req.user._id;
+  const quantityToAdd = Math.max(1, Number(quantity) || 1);
 
   try {
+    let product;
+    if (productId) {
+      product = await Product.findById(productId);
+    } else {
+      product = await Product.findOne({ name });
+    }
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found in database" });
+    }
+
+    const verifiedPrice = product.price;
+
     let cart = await Cart.findOne({ user: userId });
     if (!cart) {
       cart = new Cart({ user: userId, items: [] });
@@ -18,18 +33,19 @@ router.post("/add", authenticate, async (req, res) => {
 
     const existingItem = cart.items.find(
       (item) =>
-        (item.productId && item.productId.toString() === productId) ||
-        item.name === name
+        (item.productId && item.productId.toString() === product._id.toString()) ||
+        item.name === product.name
     );
 
     if (existingItem) {
-      existingItem.quantity += 1;
+      existingItem.quantity += quantityToAdd;
     } else {
       cart.items.push({
-        productId: productId || name,
-        name,
-        price,
-        image,
+        productId: product._id,
+        name: product.name,
+        price: verifiedPrice,
+        image: product.image || image,
+        quantity: quantityToAdd,
       });
     }
 
@@ -37,14 +53,14 @@ router.post("/add", authenticate, async (req, res) => {
     res.json({ message: "Item added to cart", cart });
   } catch (error) {
     console.error("Add to cart error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: "Failed to add item to cart" });
   }
 });
 
 // Get user cart
 router.get("/", authenticate, async (req, res) => {
   try {
-    const cart = await Cart.findOne({ user: req.user._id });
+    const cart = await Cart.findOne({ user: req.user._id }).populate("items.productId", "stock");
     res.json(cart || { items: [] });
   } catch (error) {
     res.status(500).json({ message: error.message });

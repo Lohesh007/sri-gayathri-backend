@@ -5,7 +5,8 @@ const otpLimiter = rateLimit({
   max: 3, // max 3 OTP requests per 5 minutes
   message: {
     message: "Too many OTP requests. Please wait 5 minutes."
-  }
+  },
+  validate: { trustProxy: false }
 });
 
 module.exports = otpLimiter;

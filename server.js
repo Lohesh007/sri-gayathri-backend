@@ -1,12 +1,28 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
 require("dotenv").config();
 const connectDB = require("./config/db");
 
 connectDB();
 
 const app = express();
-app.use(cors());
+
+app.enable("trust proxy"); // Trust proxy for HTTPS cookies from Render/Heroku proxy load balancers
+
+app.use(helmet({
+  contentSecurityPolicy: false, // Keep disabled to allow Razorpay and Cloudinary asset load scripts
+}));
+
+app.use(cookieParser());
+
+app.use(
+  cors({
+    origin: [process.env.FRONTEND_URL, "http://localhost:3000"],
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: "10mb" }));
 
 app.use("/api/users", require("./routes/userRoutes"));
