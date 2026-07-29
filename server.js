@@ -17,9 +17,28 @@ app.use(helmet({
 
 app.use(cookieParser());
 
+const allowedOrigins = [
+  "https://sri-gayathri-fancy-religious.netlify.app",
+  "https://sri-gayathri-fancy-religious.netlify.app/",
+  "http://localhost:3000",
+  "http://localhost:3000/"
+];
+
+if (process.env.FRONTEND_URL) {
+  const cleanUrl = process.env.FRONTEND_URL.replace(/\/$/, "");
+  allowedOrigins.push(cleanUrl);
+  allowedOrigins.push(cleanUrl + "/");
+}
+
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL, "http://localhost:3000"],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS validation failed for origin: " + origin));
+      }
+    },
     credentials: true,
   })
 );

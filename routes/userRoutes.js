@@ -135,7 +135,7 @@ router.post("/login", loginLimiter, async (req, res) => {
 
     res.json({
       message: "Login successful",
-      token: "authenticated",
+      token: token,
       user: {
         username: user.username,
         email: user.email,
