@@ -341,11 +341,45 @@ const getAdminShippingUpdateAlert = (orderId, customerName, mobile, address, del
   return getBaseTemplate(`Shipping Updated #${orderId.slice(-6)}`, "Shipping address modified", content);
 };
 
+/**
+ * 7. Admin Order Cancelled Alert Template
+ */
+const getAdminOrderCancelledAlert = (orderId, customerName, totalAmount) => {
+  const content = `
+    <h2 style="color: #c62828;">❌ ORDER CANCELLED BY CUSTOMER</h2>
+    <p>A customer has cancelled their order before dispatch. The items have been returned to stock inventory automatically.</p>
+    
+    <div class="divider"></div>
+
+    <h3 style="color: ${brandColorPrimary};">📋 Cancellation Details</h3>
+    <table style="width: 100%; font-size: 15px; margin-bottom: 20px;">
+      <tr>
+        <td style="width: 130px; font-weight: 600; color: #887799; padding: 4px 0;">Order ID:</td>
+        <td style="padding: 4px 0; color: #333; font-weight: bold;">#${orderId.slice(-6)}</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; color: #887799; padding: 4px 0;">Customer Name:</td>
+        <td style="padding: 4px 0; color: #333;">${customerName}</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; color: #887799; padding: 4px 0;">Refund Amount:</td>
+        <td style="padding: 4px 0; color: #333; font-weight: bold; color: #c62828;">₹${totalAmount}</td>
+      </tr>
+    </table>
+
+    <div class="btn-container">
+      <a href="https://sri-gayathri-fancy-religious.netlify.app/admin/orders" class="btn" style="background: #c62828;" target="_blank">View Cancelled Order</a>
+    </div>
+  `;
+  return getBaseTemplate(`Order Cancelled #${orderId.slice(-6)}`, "Customer order cancellation notification", content);
+};
+
 module.exports = {
   getVerificationEmail,
   getResetPasswordEmail,
   getCustomerOrderReceipt,
   getOrderStatusUpdateEmail,
   getAdminNewOrderAlert,
-  getAdminShippingUpdateAlert
+  getAdminShippingUpdateAlert,
+  getAdminOrderCancelledAlert
 };

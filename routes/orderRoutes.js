@@ -10,7 +10,8 @@ const {
   getCustomerOrderReceipt,
   getOrderStatusUpdateEmail,
   getAdminNewOrderAlert,
-  getAdminShippingUpdateAlert
+  getAdminShippingUpdateAlert,
+  getAdminOrderCancelledAlert
 } = require("../utils/emailTemplates");
 const crypto = require("crypto");
 
@@ -189,11 +190,11 @@ router.get("/", authenticate, async (req, res) => {
    ====================================================== */
 router.put("/cancel/:id", authenticate, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).populate("user", "username email");
 
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    if (order.user.toString() !== req.user._id.toString()) {
+    if (order.user._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "You can only cancel your own orders" });
     }
 
@@ -214,6 +215,34 @@ router.put("/cancel/:id", authenticate, async (req, res) => {
         await Product.findByIdAndUpdate(item.productId, {
           $inc: { stock: item.quantity }
         });
+      }
+    }
+
+    // Send email to customer confirming cancellation
+    if (order.user && order.user.email) {
+      const customerEmailHtml = getOrderStatusUpdateEmail(
+        order.user.username || order.customerName || "Customer",
+        order._id.toString(),
+        "Cancelled"
+      );
+      try {
+        await sendEmail(order.user.email, "Order Cancellation Confirmation", customerEmailHtml);
+      } catch (emailErr) {
+        console.error("Customer cancellation email failed:", emailErr);
+      }
+    }
+
+    // Send email to admins notifying cancellation
+    const adminEmailHtml = getAdminOrderCancelledAlert(
+      order._id.toString(),
+      order.customerName || (order.user && order.user.username) || "Customer",
+      order.totalAmount
+    );
+    for (const email of ADMIN_EMAILS) {
+      try {
+        await sendEmail(email, `Order Cancelled by Customer #${order._id.toString().slice(-6)}`, adminEmailHtml);
+      } catch (adminEmailErr) {
+        console.error("Admin cancellation email alert failed:", adminEmailErr);
       }
     }
 
@@ -241,6 +270,10 @@ router.put("/status/:id", authenticate, isAdmin, async (req, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     const oldStatus = order.status;
+    if (oldStatus === "Cancelled" || oldStatus === "Delivered") {
+      return res.status(400).json({ message: `Cannot change status of a ${oldStatus} order` });
+    }
+
     order.status = status;
     await order.save();
 
