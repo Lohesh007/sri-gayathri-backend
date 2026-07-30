@@ -140,7 +140,11 @@ router.post("/place", authenticate, async (req, res) => {
     );
 
     for (const email of ADMIN_EMAILS) {
-      await sendEmail(email, `New Order Received #${order._id.toString().slice(-6)}`, adminEmailHtml);
+      try {
+        await sendEmail(email, `New Order Received #${order._id.toString().slice(-6)}`, adminEmailHtml);
+      } catch (adminEmailErr) {
+        console.error("Admin order notification email failed:", adminEmailErr);
+      }
     }
 
     // Send confirmation & receipt to the customer
