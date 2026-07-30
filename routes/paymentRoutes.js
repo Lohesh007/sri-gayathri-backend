@@ -160,7 +160,7 @@ router.post("/webhook", async (req, res) => {
         const ADMIN_EMAILS = [
           "loheshwaran311@gmail.com",
           "srigayathri444@gmail.com",
-          "gayathriviajaya01@gmail.com"
+          "gayathrivijaya01@gmail.com"
         ];
 
         for (const email of ADMIN_EMAILS) {

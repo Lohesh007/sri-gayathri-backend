@@ -67,7 +67,7 @@ router.post("/register", async (req, res) => {
 const ADMIN_LIST = [
   { email: "loheshwaran311@gmail.com", mobile: "9597580853" },
   { email: "srigayathri444@gmail.com", mobile: "9842004217" },
-  { email: "gayathriviajaya01@gmail.com", mobile: "9443821417" }
+  { email: "gayathrivijaya01@gmail.com", mobile: "9443821417" }
 ];
 
 router.get("/verify-email/:token", async (req, res) => {
@@ -123,6 +123,17 @@ router.post("/login", loginLimiter, async (req, res) => {
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ message: "Invalid email/mobile or password" });
+
+    // Dynamic Admin Role Synchronization
+    const ADMIN_EMAILS_CHECK = [
+      "loheshwaran311@gmail.com",
+      "srigayathri444@gmail.com",
+      "gayathrivijaya01@gmail.com"
+    ];
+    if (ADMIN_EMAILS_CHECK.includes(user.email) && !user.isAdmin) {
+      user.isAdmin = true;
+      await user.save();
+    }
 
     const token = generateToken(user._id);
 

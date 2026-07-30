@@ -18,7 +18,7 @@ const crypto = require("crypto");
 const ADMIN_EMAILS = [
   "loheshwaran311@gmail.com",
   "srigayathri444@gmail.com",
-  "gayathriviajaya01@gmail.com"
+  "gayathrivijaya01@gmail.com"
 ];
 
 /* ======================================================
