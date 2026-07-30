@@ -1,25 +1,21 @@
-const nodemailer = require("nodemailer");
+const axios = require("axios");
 
 const sendEmail = async (to, subject, html) => {
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false, // true for port 465, false for 587
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-      rejectUnauthorized: false // Helps avoid SSL handshake failures in shared cloud containers
-    }
-  });
+  try {
+    const netlifyUrl = "https://sri-gayathri-fancy-religious.netlify.app/.netlify/functions/send-email";
+    const secret = process.env.EMAIL_API_SECRET || "sri-gayathri-secret-email-key-2026";
 
-  await transporter.sendMail({
-    from: `Sri Gayathri Religious <${process.env.EMAIL_USER}>`,
-    to,
-    subject,
-    html,
-  });
+    await axios.post(netlifyUrl, {
+      to,
+      subject,
+      html,
+      secret,
+    });
+  } catch (err) {
+    const errorDetails = err.response?.data?.error || err.message;
+    console.error("HTTP email send failed:", errorDetails);
+    throw new Error(errorDetails);
+  }
 };
 
 module.exports = sendEmail;
