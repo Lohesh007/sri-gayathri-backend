@@ -279,6 +279,7 @@ router.put("/status/:id", authenticate, isAdmin, async (req, res) => {
     res.json({ message: "Order status updated", order });
 
   } catch (err) {
+    console.error("Error updating order status:", err);
     res.status(500).json({ message: err.message });
   }
 });
