@@ -44,6 +44,10 @@ app.use(
 );
 app.use(express.json({ limit: "10mb" }));
 
+app.get("/", (req, res) => {
+  res.status(200).send("Sri Gayathri API is running 🚀");
+});
+
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/products", require("./routes/productRoutes"));
 app.use("/api/cart", require("./routes/cartRoutes"));
