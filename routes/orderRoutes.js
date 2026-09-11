@@ -123,13 +123,7 @@ router.post("/place", authenticate, async (req, res) => {
       });
     }
 
-    // Clear cart
-    cart.items = [];
-    await cart.save();
-
-    /* ======================================================
-            SEND EMAIL NOTIFICATION TO ADMINS
-       ====================================================== */
+    // Prepare email HTML templates
     const adminEmailHtml = getAdminNewOrderAlert(
       order._id.toString(),
       req.user.username,
@@ -140,15 +134,6 @@ router.post("/place", authenticate, async (req, res) => {
       deliveryInstructions
     );
 
-    for (const email of ADMIN_EMAILS) {
-      try {
-        await sendEmail(email, `New Order Received #${order._id.toString().slice(-6)}`, adminEmailHtml);
-      } catch (adminEmailErr) {
-        console.error("Admin order notification email failed:", adminEmailErr);
-      }
-    }
-
-    // Send confirmation & receipt to the customer
     const customerEmailHtml = getCustomerOrderReceipt(
       req.user.username,
       order._id.toString(),
@@ -159,13 +144,27 @@ router.post("/place", authenticate, async (req, res) => {
       deliveryInstructions
     );
 
-    try {
-      await sendEmail(req.user.email, `Order Confirmation & Receipt #${order._id.toString().slice(-6)}`, customerEmailHtml);
-    } catch (emailErr) {
-      console.error("Customer confirmation email failed:", emailErr);
-    }
+    // Send response immediately so customer gets instant confirmation!
+    res.json({ message: "Order placed successfully", order });
 
-    return res.json({ message: "Order placed successfully", order });
+    // Send emails in background (non-blocking)
+    (async () => {
+      for (const email of ADMIN_EMAILS) {
+        try {
+          await sendEmail(email, `New Order Received #${order._id.toString().slice(-6)}`, adminEmailHtml);
+        } catch (adminEmailErr) {
+          console.error("Admin order notification email failed:", adminEmailErr);
+        }
+      }
+
+      if (req.user && req.user.email) {
+        try {
+          await sendEmail(req.user.email, `Order Confirmation & Receipt #${order._id.toString().slice(-6)}`, customerEmailHtml);
+        } catch (emailErr) {
+          console.error("Customer confirmation email failed:", emailErr);
+        }
+      }
+    })();
 
   } catch (error) {
     console.error(error);
