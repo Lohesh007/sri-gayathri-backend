@@ -177,7 +177,7 @@ router.post("/place", authenticate, async (req, res) => {
    ====================================================== */
 router.get("/", authenticate, async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const orders = await Order.find({ user: req.user._id, status: { $ne: "PendingPayment" } }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -269,6 +269,9 @@ router.put("/status/:id", authenticate, isAdmin, async (req, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     const oldStatus = order.status;
+    if (oldStatus === "PendingPayment") {
+      return res.status(400).json({ message: "Cannot modify status of an unpaid order" });
+    }
     if (oldStatus === "Cancelled" || oldStatus === "Delivered") {
       return res.status(400).json({ message: `Cannot change status of a ${oldStatus} order` });
     }
@@ -322,7 +325,7 @@ router.put("/status/:id", authenticate, isAdmin, async (req, res) => {
 // GET ALL ORDERS (ADMIN)
 router.get("/all", authenticate, isAdmin, async (req, res) => {
   try {
-    const orders = await Order.find({}).sort({ createdAt: -1 }).populate("user", "username email mobile");
+    const orders = await Order.find({ status: { $ne: "PendingPayment" } }).sort({ createdAt: -1 }).populate("user", "username email mobile");
     res.json(orders);
   } catch (err) {
     res.status(500).json({ message: err.message });
