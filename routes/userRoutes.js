@@ -44,7 +44,12 @@ router.post("/register", async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    const verifyURL = `${process.env.FRONTEND_URL}/verify-email/${token}`;
+    const rawFrontend = process.env.FRONTEND_URL || "https://sri-gayathri-fancy-religious.netlify.app";
+    const cleanFrontend = rawFrontend.includes("sri-gayathri-religious.netlify.app")
+      ? "https://sri-gayathri-fancy-religious.netlify.app"
+      : rawFrontend.replace(/\/$/, "");
+
+    const verifyURL = `${cleanFrontend}/verify-email/${token}`;
     const emailHtml = getVerificationEmail(username, verifyURL);
 
     await sendEmail(
@@ -182,7 +187,12 @@ router.post("/forgot", async (req, res) => {
       { expiresIn: "15m" }
     );
 
-    const resetUrl = `${process.env.FRONTEND_URL}/reset/${resetToken}`;
+    const rawFrontend = process.env.FRONTEND_URL || "https://sri-gayathri-fancy-religious.netlify.app";
+    const cleanFrontend = rawFrontend.includes("sri-gayathri-religious.netlify.app")
+      ? "https://sri-gayathri-fancy-religious.netlify.app"
+      : rawFrontend.replace(/\/$/, "");
+
+    const resetUrl = `${cleanFrontend}/reset/${resetToken}`;
     const emailHtml = getResetPasswordEmail(resetUrl);
 
     await sendEmail(
