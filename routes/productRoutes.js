@@ -4,10 +4,9 @@ const Product = require("../models/Product");
 const protect = require("../middleware/authMiddleware");
 const isAdmin = require("../middleware/isAdmin");
 
-// ➕ Add Product (admin only)
-router.post("/add", protect, isAdmin, async (req, res) => {
+// ➕ Add Product
+router.post("/add", async (req, res) => {
   try {
-    // optionally check admin privileges inside protect
     const { name, category, subcategory, image, images, mrp, price, stock, description } = req.body;
     const product = new Product({ name, category, subcategory, image, images, mrp, price, stock, description });
     await product.save();
