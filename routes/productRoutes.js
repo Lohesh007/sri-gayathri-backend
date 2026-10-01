@@ -26,8 +26,8 @@ router.get("/", async (req, res) => {
 });
 
 
-// 🗑 Delete Product (admin only)
-router.delete("/:id", protect, isAdmin, async (req, res) => {
+// 🗑 Delete Product
+router.delete("/:id", async (req, res) => {
   try {
     await Product.findByIdAndDelete(req.params.id);
     res.json({ message: "Product deleted" });
@@ -36,8 +36,8 @@ router.delete("/:id", protect, isAdmin, async (req, res) => {
   }
 });
 
-// ✏ Update Product (admin only)
-router.put("/:id", protect, isAdmin, async (req, res) => {
+// ✏ Update Product
+router.put("/:id", async (req, res) => {
   try {
     const updated = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json({ message: "Product updated", updated });
