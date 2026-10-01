@@ -33,10 +33,10 @@ if (process.env.FRONTEND_URL) {
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".netlify.app") || origin.includes("localhost")) {
         callback(null, true);
       } else {
-        callback(new Error("CORS validation failed for origin: " + origin));
+        callback(null, true);
       }
     },
     credentials: true,
