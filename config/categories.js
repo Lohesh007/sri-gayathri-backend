@@ -38,5 +38,19 @@ module.exports = {
     "stainless steel chainn",
     "covering chain",
     "german chain"
+  ],
+  Keychain: [
+    "metal keychain",
+    "wooden keychain",
+    "crystal keychain",
+    "photo keychain",
+    "general keychain"
+  ],
+  Others: [
+    "car stands",
+    "candle stands",
+    "stickers & badges",
+    "prayer books",
+    "general items"
   ]
 };
