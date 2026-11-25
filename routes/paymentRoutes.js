@@ -2,6 +2,17 @@ const express = require("express");
 const router = express.Router();
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => {
+  switch (char) {
+    case "&": return "&amp;";
+    case "<": return "&lt;";
+    case ">": return "&gt;";
+    case "\"": return "&quot;";
+    case "'": return "&#39;";
+    default: return char;
+  }
+});
+
 const protect = require("../middleware/authMiddleware");
 const Cart = require("../models/Cart");
 const Order = require("../models/Order");
@@ -172,7 +183,7 @@ router.post("/webhook", async (req, res) => {
             (item) => `
             <tr style="border-bottom: 1px solid #f0e6ff;">
               <td style="padding: 10px 0; font-size: 15px; color: #333;">
-                <b>${item.name}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
+                <b>${escapeHtml(item.name)}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
               </td>
               <td style="padding: 10px 0; font-size: 15px; color: #333; text-align: right; font-weight: bold;">
                 ₹${item.price * item.quantity}
