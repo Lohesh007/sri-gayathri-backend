@@ -53,6 +53,13 @@ router.post("/register", registrationLimiter, async (req, res) => {
   }
 });
 
+// Admin accounts are matched by both email and mobile during verification.
+const ADMIN_LIST = [
+  { email: "loheshwaran311@gmail.com", mobile: "9597580853" },
+  { email: "srigayathri444@gmail.com", mobile: "9842004217" },
+  { email: "gayathrivijaya01@gmail.com", mobile: "9443821417" }
+];
+
 router.get("/verify-email/:token", async (req, res) => {
   try {
     const tokenHash = crypto.createHash("sha256").update(req.params.token).digest("hex");
