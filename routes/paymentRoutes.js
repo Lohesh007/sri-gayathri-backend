@@ -2,6 +2,17 @@ const express = require("express");
 const router = express.Router();
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => {
+  switch (char) {
+    case "&": return "&amp;";
+    case "<": return "&lt;";
+    case ">": return "&gt;";
+    case "\"": return "&quot;";
+    case "'": return "&#39;";
+    default: return char;
+  }
+});
+
 const protect = require("../middleware/authMiddleware");
 const Cart = require("../models/Cart");
 const Order = require("../models/Order");
@@ -23,10 +34,18 @@ router.post("/create-order", protect, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    const totalAmount = cart.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
+    const verifiedItems = [];
+    for (const cartItem of cart.items) {
+      const product = await Product.findById(cartItem.productId);
+      if (!product) return res.status(400).json({ message: "A cart product is no longer available" });
+      const quantity = Number(cartItem.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99 || quantity > product.stock) {
+        return res.status(400).json({ message: "Cart quantity is invalid or exceeds stock for " + product.name });
+      }
+      verifiedItems.push({ productId: product._id, name: product.name, price: product.price, image: product.image, quantity });
+    }
+    const totalAmount = verifiedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) return res.status(400).json({ message: "Invalid order total" });
 
     const options = {
       amount: totalAmount * 100,
@@ -39,7 +58,7 @@ router.post("/create-order", protect, async (req, res) => {
     // Save a PendingPayment Order in the database
     const pendingOrder = new Order({
       user: req.user._id,
-      items: cart.items,
+      items: verifiedItems,
       totalAmount,
       customerName: req.user.username,
       mobile: req.user.mobile,
@@ -70,11 +89,14 @@ router.post("/verify", protect, async (req, res) => {
     hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
     const generatedSignature = hmac.digest("hex");
 
-    if (generatedSignature === razorpay_signature) {
-      return res.json({ message: "Payment verified" });
+    const supplied = Buffer.from(String(razorpay_signature || ""), "utf8");
+    const expected = Buffer.from(generatedSignature, "utf8");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      return res.status(400).json({ message: "Invalid payment signature" });
     }
-
-    return res.status(400).json({ message: "Invalid payment signature" });
+    const pendingOrder = await Order.findOne({ razorpayOrderId: razorpay_order_id, user: req.user._id, status: "PendingPayment" });
+    if (!pendingOrder) return res.status(400).json({ message: "Pending payment order not found" });
+    return res.json({ message: "Payment verified" });
 
   } catch (error) {
     console.error("Payment verify error:", error);
@@ -88,15 +110,15 @@ router.post("/webhook", async (req, res) => {
     const signature = req.headers["x-razorpay-signature"];
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    // Verify webhook signature (if webhook secret is configured)
-    if (webhookSecret && signature) {
-      const shasum = crypto.createHmac("sha256", webhookSecret);
-      shasum.update(JSON.stringify(req.body));
-      const digest = shasum.digest("hex");
-
-      if (digest !== signature) {
-        return res.status(400).json({ message: "Invalid webhook signature" });
-      }
+    // Webhook verification is mandatory and uses the exact raw request bytes.
+    if (!webhookSecret || !signature || !req.rawBody) {
+      return res.status(401).json({ message: "Webhook verification is not configured" });
+    }
+    const digest = crypto.createHmac("sha256", webhookSecret).update(req.rawBody).digest("hex");
+    const supplied = Buffer.from(signature, "utf8");
+    const expected = Buffer.from(digest, "utf8");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      return res.status(400).json({ message: "Invalid webhook signature" });
     }
 
     const event = req.body.event;
@@ -106,17 +128,42 @@ router.post("/webhook", async (req, res) => {
       const razorpayOrderId = paymentEntity.order_id;
       const razorpayPaymentId = paymentEntity.id;
 
+      const paymentAmount = Number(paymentEntity.amount);
+      const paymentCurrency = paymentEntity.currency;
       const order = await Order.findOne({ razorpayOrderId });
       if (order && order.status === "PendingPayment") {
-        order.status = "Pending";
-        order.razorpayPaymentId = razorpayPaymentId;
-        await order.save();
+        if (paymentAmount !== Math.round(order.totalAmount * 100) || paymentCurrency !== "INR") {
+          console.error("Captured payment amount/currency mismatch for order", order._id.toString());
+          order.status = "PaymentMismatch";
+          order.razorpayPaymentId = razorpayPaymentId;
+          await order.save();
+          return res.status(200).send("payment mismatch recorded");
+        }
+        // Atomically claim fulfillment to avoid webhook retries and concurrent /place calls.
+        const claimedOrder = await Order.findOneAndUpdate(
+          { _id: order._id, status: "PendingPayment" },
+          { $set: { status: "Pending", razorpayPaymentId: razorpayPaymentId } },
+          { new: true }
+        );
+        if (!claimedOrder) return res.status(200).send("already processed");
+        order.status = claimedOrder.status;
+        order.razorpayPaymentId = claimedOrder.razorpayPaymentId;
 
-        // Decrement stock levels
+        // Decrement stock safely. If a stock conflict occurs, roll back prior decrements.
+        const decremented = [];
         for (const item of order.items) {
-          await Product.findByIdAndUpdate(item.productId, {
-            $inc: { stock: -item.quantity }
-          });
+          const stockResult = await Product.updateOne(
+            { _id: item.productId, stock: { $gte: item.quantity } },
+            { $inc: { stock: -item.quantity } }
+          );
+          if (stockResult.modifiedCount !== 1) {
+            for (const prior of decremented) await Product.updateOne({ _id: prior.productId }, { $inc: { stock: prior.quantity } });
+            order.status = "StockIssue";
+            await order.save();
+            console.error("Payment captured but stock conflict for order", order._id.toString());
+            return res.status(200).send("stock conflict recorded");
+          }
+          decremented.push({ productId: item.productId, quantity: item.quantity });
         }
 
         // Clear user's cart
@@ -136,7 +183,7 @@ router.post("/webhook", async (req, res) => {
             (item) => `
             <tr style="border-bottom: 1px solid #f0e6ff;">
               <td style="padding: 10px 0; font-size: 15px; color: #333;">
-                <b>${item.name}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
+                <b>${escapeHtml(item.name)}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
               </td>
               <td style="padding: 10px 0; font-size: 15px; color: #333; text-align: right; font-weight: bold;">
                 ₹${item.price * item.quantity}

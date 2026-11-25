@@ -1,20 +1,16 @@
 const axios = require("axios");
 
 const sendEmail = async (to, subject, html) => {
-  try {
-    const netlifyUrl = "https://sri-gayathri-fancy-religious.netlify.app/.netlify/functions/send-email";
-    const secret = process.env.EMAIL_API_SECRET || "sri-gayathri-secret-email-key-2026";
+  const netlifyUrl = process.env.EMAIL_FUNCTION_URL || "https://sri-gayathri-fancy-religious.netlify.app/.netlify/functions/send-email";
+  const secret = process.env.EMAIL_API_SECRET;
+  if (!secret) throw new Error("EMAIL_API_SECRET is not configured on the backend");
 
-    await axios.post(netlifyUrl, {
-      to,
-      subject,
-      html,
-      secret,
-    });
+  try {
+    await axios.post(netlifyUrl, { to, subject, html, secret }, { timeout: 15000 });
   } catch (err) {
     const errorDetails = err.response?.data?.error || err.message;
     console.error("HTTP email send failed:", errorDetails);
-    throw new Error(errorDetails);
+    throw new Error("Email delivery failed");
   }
 };
 

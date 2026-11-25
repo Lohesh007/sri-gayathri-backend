@@ -11,11 +11,11 @@ const userSchema = new mongoose.Schema({
   isAdmin: { type: Boolean, default: false },
 });
 
-// HASH PASSWORD
-userSchema.pre("save", async function(next) {
-  if (!this.isModified("password")) return next();
+// HASH PASSWORD. Internal verification flow may set passwordHashIsPreHashed
+// only after loading a hashed value from PendingRegistration.
+userSchema.pre("save", async function() {
+  if (!this.isModified("password") || this.passwordHashIsPreHashed) return;
   this.password = await bcrypt.hash(this.password, 10);
-  next();
 });
 
 module.exports = mongoose.model("User", userSchema);

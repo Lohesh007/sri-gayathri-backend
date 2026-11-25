@@ -14,6 +14,17 @@ const {
   getAdminOrderCancelledAlert
 } = require("../utils/emailTemplates");
 const crypto = require("crypto");
+const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => {
+  switch (char) {
+    case "&": return "&amp;";
+    case "<": return "&lt;";
+    case ">": return "&gt;";
+    case "\"": return "&quot;";
+    case "'": return "&#39;";
+    default: return char;
+  }
+});
+
 
 // ADMIN EMAILS
 const ADMIN_EMAILS = [
@@ -38,14 +49,22 @@ router.post("/place", authenticate, async (req, res) => {
     hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
     const generatedSignature = hmac.digest("hex");
 
-    if (generatedSignature !== razorpay_signature) {
+    const suppliedSignature = Buffer.from(String(razorpay_signature || ""), "utf8");
+    const expectedSignature = Buffer.from(generatedSignature, "utf8");
+    if (suppliedSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(suppliedSignature, expectedSignature)) {
       return res.status(400).json({ message: "Invalid payment signature" });
     }
 
-    // 1. Check if the order was already completed by the webhook
+    // Payment must match a pending order created for the current account.
     const existingOrder = await Order.findOne({ razorpayOrderId: razorpay_order_id });
-    if (existingOrder && existingOrder.status !== "PendingPayment") {
-      return res.json({ message: "Order placed successfully", order: existingOrder });
+    if (!existingOrder || existingOrder.user.toString() !== req.user._id.toString()) {
+      return res.status(400).json({ message: "Payment order not found for this account" });
+    }
+    if (existingOrder.status !== "PendingPayment") {
+      if (existingOrder.razorpayPaymentId === razorpay_payment_id) {
+        return res.json({ message: "Order placed successfully", order: existingOrder });
+      }
+      return res.status(409).json({ message: "This order has already been processed with a different payment" });
     }
 
     // 2. Check for double spending / payment replay attack
@@ -60,30 +79,23 @@ router.post("/place", authenticate, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    // Verify stock levels before saving order
-    for (const item of cart.items) {
+    // Use the saved checkout snapshot rather than mutable cart contents.
+    const paidItems = existingOrder.items;
+    if (!paidItems || paidItems.length === 0) return res.status(400).json({ message: "Pending order has no items" });
+    for (const item of paidItems) {
       const product = await Product.findById(item.productId);
-      if (!product) {
-        return res.status(404).json({ message: `Product ${item.name} not found` });
-      }
-      if (product.stock < item.quantity) {
-        return res.status(400).json({ message: `Insufficient stock for ${item.name}. Available: ${product.stock}` });
+      if (!product) return res.status(400).json({ message: `Product ${item.name} is no longer available` });
+      if (!Number.isInteger(item.quantity) || item.quantity < 1 || product.stock < item.quantity) {
+        return res.status(409).json({ message: `Insufficient stock for ${item.name}. Available: ${product.stock}` });
       }
     }
-
-    // Calculate total
-    const totalAmount = cart.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-
-    // Order summary HTML table for Email Templates
-    const productListTable = cart.items
+    const totalAmount = existingOrder.totalAmount;
+    const productListTable = paidItems
       .map(
         (item) => `
         <tr style="border-bottom: 1px solid #f0e6ff;">
           <td style="padding: 10px 0; font-size: 15px; color: #333;">
-            <b>${item.name}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
+            <b>${escapeHtml(item.name)}</b> <span style="color: #887799; font-size: 13px;">(x${item.quantity})</span>
           </td>
           <td style="padding: 10px 0; font-size: 15px; color: #333; text-align: right; font-weight: bold;">
             ₹${item.price * item.quantity}
@@ -93,52 +105,50 @@ router.post("/place", authenticate, async (req, res) => {
       )
       .join("");
 
-    // 3. Update the existing PendingPayment order, or create it if not found
-    let order = existingOrder;
-    if (order) {
-      order.status = "Pending";
-      order.razorpayPaymentId = razorpay_payment_id;
-      order.deliveryInstructions = deliveryInstructions || order.deliveryInstructions || "";
-      await order.save();
-    } else {
-      order = new Order({
-        user: req.user._id,
-        items: cart.items,
-        totalAmount,
-        customerName: req.user.username,
-        mobile: req.user.mobile,
-        address: req.user.address,
-        deliveryInstructions: deliveryInstructions || "",
-        status: "Pending",
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-      });
-      await order.save();
+    // Atomically claim this pending payment so webhook retries or concurrent requests cannot fulfill it twice.
+    const order = await Order.findOneAndUpdate(
+      { _id: existingOrder._id, status: "PendingPayment", user: req.user._id },
+      { $set: { status: "Pending", razorpayPaymentId: razorpay_payment_id, deliveryInstructions: deliveryInstructions || existingOrder.deliveryInstructions || "" } },
+      { new: true }
+    );
+    if (!order) {
+      const currentOrder = await Order.findById(existingOrder._id);
+      if (currentOrder && currentOrder.razorpayPaymentId === razorpay_payment_id) return res.json({ message: "Order placed successfully", order: currentOrder });
+      return res.status(409).json({ message: "Payment is already being processed" });
     }
 
-    // Decrement stock levels
-    for (const item of cart.items) {
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity }
-      });
+    // Decrement stock from the immutable checkout snapshot with rollback on partial failure.
+    const decremented = [];
+    for (const item of paidItems) {
+      const stockUpdate = await Product.updateOne(
+        { _id: item.productId, stock: { $gte: item.quantity } },
+        { $inc: { stock: -item.quantity } }
+      );
+      if (stockUpdate.modifiedCount !== 1) {
+        for (const prior of decremented) await Product.updateOne({ _id: prior.productId }, { $inc: { stock: prior.quantity } });
+        order.status = "StockIssue";
+        await order.save();
+        return res.status(409).json({ message: "Payment received, but stock changed. Please contact support.", orderId: order._id });
+      }
+      decremented.push({ productId: item.productId, quantity: item.quantity });
     }
 
     // Prepare email HTML templates
     const adminEmailHtml = getAdminNewOrderAlert(
       order._id.toString(),
-      req.user.username,
-      req.user.mobile,
-      req.user.address,
+      order.customerName,
+      order.mobile,
+      order.address,
       productListTable,
       totalAmount,
       deliveryInstructions
     );
 
     const customerEmailHtml = getCustomerOrderReceipt(
-      req.user.username,
+      order.customerName,
       order._id.toString(),
-      req.user.address,
-      req.user.mobile,
+      order.address,
+      order.mobile,
       productListTable,
       totalAmount,
       deliveryInstructions

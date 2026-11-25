@@ -4,6 +4,18 @@ const brandColorPrimary = "#5e0099"; // Royal Velvet Purple
 const brandColorSecondary = "#D4AF37"; // Royal Gold
 const textColorDark = "#2c004f";
 
+const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => {
+  switch (char) {
+    case "&": return "&amp;";
+    case "<": return "&lt;";
+    case ">": return "&gt;";
+    case "\"": return "&quot;";
+    case "'": return "&#39;";
+    default: return char;
+  }
+});
+
+
 /**
  * Base HTML Template Wrapper
  */
@@ -132,7 +144,7 @@ const getBaseTemplate = (title, preheader, contentHtml) => {
  */
 const getVerificationEmail = (username, verifyUrl) => {
   const content = `
-    <h2>Welcome to Sri Gayathri, ${username}!</h2>
+    <h2>Welcome to Sri Gayathri, ${escapeHtml(username)}!</h2>
     <p>We are delighted to have you join our religious and devotional community. To complete your signup and activate your account, please click the secure link below to verify your email address:</p>
     <div class="btn-container">
       <a href="${verifyUrl}" class="btn" target="_blank">Verify Email Address</a>
@@ -167,7 +179,7 @@ const getResetPasswordEmail = (resetUrl) => {
  */
 const getCustomerOrderReceipt = (username, orderId, address, mobile, productListHtml, totalAmount, deliveryInstructions) => {
   const content = `
-    <h2>Thank You for Your Order, ${username}!</h2>
+    <h2>Thank You for Your Order, ${escapeHtml(username)}!</h2>
     <p>We have successfully received your payment. Our store team is preparing your blessed items for shipping.</p>
     
     <div class="divider"></div>
@@ -187,9 +199,9 @@ const getCustomerOrderReceipt = (username, orderId, address, mobile, productList
 
     <div style="background-color: #faf8ff; border: 1px solid #f0e6ff; border-radius: 12px; padding: 18px; margin-bottom: 25px;">
       <h4 style="margin: 0 0 8px; color: ${brandColorPrimary};">📍 Delivery Address</h4>
-      <p style="margin: 0; font-size: 14.5px; color: #555;">${address}</p>
-      <p style="margin: 5px 0 0; font-size: 14.5px; color: #555;"><b>Mobile:</b> ${mobile}</p>
-      ${deliveryInstructions ? `<p style="margin: 10px 0 0; font-size: 13.5px; color: #7a14c7; font-style: italic;"><b>Notes:</b> "${deliveryInstructions}"</p>` : ""}
+      <p style="margin: 0; font-size: 14.5px; color: #555;">${escapeHtml(address)}</p>
+      <p style="margin: 5px 0 0; font-size: 14.5px; color: #555;"><b>Mobile:</b> ${escapeHtml(mobile)}</p>
+      ${deliveryInstructions ? `<p style="margin: 10px 0 0; font-size: 13.5px; color: #7a14c7; font-style: italic;"><b>Notes:</b> "${escapeHtml(deliveryInstructions)}"</p>` : ""}
     </div>
 
     <h3 style="text-align: right; margin-top: 0; color: ${brandColorPrimary};">
@@ -231,7 +243,7 @@ const getOrderStatusUpdateEmail = (username, orderId, status) => {
 
   const content = `
     <h2>Order Update Notification</h2>
-    <p>Dear ${username}, the dispatch status of your Order <b>#${orderId.slice(-6)}</b> has been updated:</p>
+    <p>Dear ${escapeHtml(username)}, the dispatch status of your Order <b>#${orderId.slice(-6)}</b> has been updated:</p>
     
     <div style="text-align: center; margin: 30px 0;">
       <span style="background-color: ${statusBadgeColor}; padding: 12px 30px; border-radius: 50px; font-size: 18px; font-weight: 800; color: ${textColorDark}; box-shadow: 0 4px 10px rgba(0,0,0,0.04);">
@@ -244,7 +256,7 @@ const getOrderStatusUpdateEmail = (username, orderId, status) => {
       <a href="https://sri-gayathri-fancy-religious.netlify.app/orders" class="btn" target="_blank">View Order Details</a>
     </div>
   `;
-  return getBaseTemplate(`Order #${orderId.slice(-6)} Status: ${status}`, "Your order status has changed", content);
+  return getBaseTemplate(`Order #${orderId.slice(-6)} Status: ${escapeHtml(status)}`, "Your order status has changed", content);
 };
 
 /**
@@ -261,20 +273,20 @@ const getAdminNewOrderAlert = (orderId, customerName, mobile, address, productLi
     <table style="width: 100%; font-size: 15px; margin-bottom: 20px;">
       <tr>
         <td style="width: 130px; font-weight: 600; color: #887799; padding: 4px 0;">Name:</td>
-        <td style="padding: 4px 0; color: #333;">${customerName}</td>
+        <td style="padding: 4px 0; color: #333;">${escapeHtml(customerName)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0;">Mobile Number:</td>
-        <td style="padding: 4px 0; color: #333;">${mobile}</td>
+        <td style="padding: 4px 0; color: #333;">${escapeHtml(mobile)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0; vertical-align: top;">Delivery Address:</td>
-        <td style="padding: 4px 0; color: #333; line-height: 1.4;">${address}</td>
+        <td style="padding: 4px 0; color: #333; line-height: 1.4;">${escapeHtml(address)}</td>
       </tr>
       ${deliveryInstructions ? `
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0; vertical-align: top;">Instructions:</td>
-        <td style="padding: 4px 0; color: #d32f2f; font-weight: 600;">"${deliveryInstructions}"</td>
+        <td style="padding: 4px 0; color: #d32f2f; font-weight: 600;">"${escapeHtml(deliveryInstructions)}"</td>
       </tr>` : ""}
     </table>
 
@@ -318,15 +330,15 @@ const getAdminShippingUpdateAlert = (orderId, customerName, mobile, address, del
     <table style="width: 100%; font-size: 15px; margin-bottom: 20px;">
       <tr>
         <td style="width: 130px; font-weight: 600; color: #887799; padding: 4px 0;">Customer Name:</td>
-        <td style="padding: 4px 0; color: #333;">${customerName}</td>
+        <td style="padding: 4px 0; color: #333;">${escapeHtml(customerName)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0;">New Mobile:</td>
-        <td style="padding: 4px 0; color: #333;">${mobile}</td>
+        <td style="padding: 4px 0; color: #333;">${escapeHtml(mobile)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0; vertical-align: top;">New Address:</td>
-        <td style="padding: 4px 0; color: #333; line-height: 1.4; font-weight: 700;">${address}</td>
+        <td style="padding: 4px 0; color: #333; line-height: 1.4; font-weight: 700;">${escapeHtml(address)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0; vertical-align: top;">New Instructions:</td>
@@ -359,7 +371,7 @@ const getAdminOrderCancelledAlert = (orderId, customerName, totalAmount) => {
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0;">Customer Name:</td>
-        <td style="padding: 4px 0; color: #333;">${customerName}</td>
+        <td style="padding: 4px 0; color: #333;">${escapeHtml(customerName)}</td>
       </tr>
       <tr>
         <td style="font-weight: 600; color: #887799; padding: 4px 0;">Refund Amount:</td>
