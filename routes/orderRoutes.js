@@ -50,9 +50,10 @@ router.post("/place", authenticate, async (req, res) => {
       return res.status(400).json({ message: "Payment order not found for this account" });
     }
     if (existingOrder.status !== "PendingPayment") {
-      if (existingOrder.razorpayPaymentId === razorpay_payment_id || existingOrder.status !== "PendingPayment") {
+      if (existingOrder.razorpayPaymentId === razorpay_payment_id) {
         return res.json({ message: "Order placed successfully", order: existingOrder });
       }
+      return res.status(409).json({ message: "This order has already been processed with a different payment" });
     }
 
     // 2. Check for double spending / payment replay attack
@@ -67,25 +68,18 @@ router.post("/place", authenticate, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    // Verify stock levels before saving order
-    for (const item of cart.items) {
+    // Use the saved checkout snapshot rather than mutable cart contents.
+    const paidItems = existingOrder.items;
+    if (!paidItems || paidItems.length === 0) return res.status(400).json({ message: "Pending order has no items" });
+    for (const item of paidItems) {
       const product = await Product.findById(item.productId);
-      if (!product) {
-        return res.status(404).json({ message: `Product ${item.name} not found` });
-      }
-      if (product.stock < item.quantity) {
-        return res.status(400).json({ message: `Insufficient stock for ${item.name}. Available: ${product.stock}` });
+      if (!product) return res.status(400).json({ message: `Product ${item.name} is no longer available` });
+      if (!Number.isInteger(item.quantity) || item.quantity < 1 || product.stock < item.quantity) {
+        return res.status(409).json({ message: `Insufficient stock for ${item.name}. Available: ${product.stock}` });
       }
     }
-
-    // Calculate total
-    const totalAmount = cart.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-
-    // Order summary HTML table for Email Templates
-    const productListTable = cart.items
+    const totalAmount = existingOrder.totalAmount;
+    const productListTable = paidItems
       .map(
         (item) => `
         <tr style="border-bottom: 1px solid #f0e6ff;">
@@ -110,7 +104,7 @@ router.post("/place", authenticate, async (req, res) => {
     } else {
       order = new Order({
         user: req.user._id,
-        items: cart.items,
+        items: paidItems,
         totalAmount,
         customerName: req.user.username,
         mobile: req.user.mobile,
@@ -123,29 +117,35 @@ router.post("/place", authenticate, async (req, res) => {
       await order.save();
     }
 
-    // Decrement stock levels
-    for (const item of cart.items) {
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity }
-      });
+    // Decrement stock from the checkout snapshot (not current cart).
+    for (const item of paidItems) {
+      const stockUpdate = await Product.updateOne(
+        { _id: item.productId, stock: { $gte: item.quantity } },
+        { $inc: { stock: -item.quantity } }
+      );
+      if (stockUpdate.modifiedCount !== 1) {
+        order.status = "StockIssue";
+        await order.save();
+        return res.status(409).json({ message: "Payment received, but stock changed. Please contact support.", orderId: order._id });
+      }
     }
 
     // Prepare email HTML templates
     const adminEmailHtml = getAdminNewOrderAlert(
       order._id.toString(),
-      req.user.username,
-      req.user.mobile,
-      req.user.address,
+      order.customerName,
+      order.mobile,
+      order.address,
       productListTable,
       totalAmount,
       deliveryInstructions
     );
 
     const customerEmailHtml = getCustomerOrderReceipt(
-      req.user.username,
+      order.customerName,
       order._id.toString(),
-      req.user.address,
-      req.user.mobile,
+      order.address,
+      order.mobile,
       productListTable,
       totalAmount,
       deliveryInstructions
