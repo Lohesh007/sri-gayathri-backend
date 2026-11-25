@@ -7,6 +7,9 @@ const sendEmail = require("../utils/sendEmail");
 const { getVerificationEmail, getResetPasswordEmail } = require("../utils/emailTemplates");
 const authenticate = require("../middleware/authMiddleware");
 const loginLimiter = require("../middleware/loginLimiter");
+const rateLimit = require("express-rate-limit");
+const registrationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { message: "Too many registration attempts. Please try again later." } });
+const passwordResetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { message: "Too many password reset requests. Please try again later." } });
 
 // Generate JWT
 const generateToken = (id) =>
@@ -16,7 +19,7 @@ const generateToken = (id) =>
 // =====================================================
 // REGISTER → SEND EMAIL VERIFICATION
 // =====================================================
-router.post("/register", async (req, res) => {
+router.post("/register", registrationLimiter, async (req, res) => {
   try {
     const { username, email, mobile, address, password } = req.body;
 
@@ -170,7 +173,7 @@ router.post("/login", loginLimiter, async (req, res) => {
 // =====================================================
 // FORGOT PASSWORD → SEND RESET LINK
 // =====================================================
-router.post("/forgot", async (req, res) => {
+router.post("/forgot", passwordResetLimiter, async (req, res) => {
   try {
     const { email } = req.body;
 
