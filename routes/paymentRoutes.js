@@ -117,17 +117,42 @@ router.post("/webhook", async (req, res) => {
       const razorpayOrderId = paymentEntity.order_id;
       const razorpayPaymentId = paymentEntity.id;
 
+      const paymentAmount = Number(paymentEntity.amount);
+      const paymentCurrency = paymentEntity.currency;
       const order = await Order.findOne({ razorpayOrderId });
       if (order && order.status === "PendingPayment") {
-        order.status = "Pending";
-        order.razorpayPaymentId = razorpayPaymentId;
-        await order.save();
+        if (paymentAmount !== Math.round(order.totalAmount * 100) || paymentCurrency !== "INR") {
+          console.error("Captured payment amount/currency mismatch for order", order._id.toString());
+          order.status = "PaymentMismatch";
+          order.razorpayPaymentId = razorpayPaymentId;
+          await order.save();
+          return res.status(200).send("payment mismatch recorded");
+        }
+        // Atomically claim fulfillment to avoid webhook retries and concurrent /place calls.
+        const claimedOrder = await Order.findOneAndUpdate(
+          { _id: order._id, status: "PendingPayment" },
+          { $set: { status: "Pending", razorpayPaymentId: razorpayPaymentId } },
+          { new: true }
+        );
+        if (!claimedOrder) return res.status(200).send("already processed");
+        order.status = claimedOrder.status;
+        order.razorpayPaymentId = claimedOrder.razorpayPaymentId;
 
-        // Decrement stock levels
+        // Decrement stock safely. If a stock conflict occurs, roll back prior decrements.
+        const decremented = [];
         for (const item of order.items) {
-          await Product.findByIdAndUpdate(item.productId, {
-            $inc: { stock: -item.quantity }
-          });
+          const stockResult = await Product.updateOne(
+            { _id: item.productId, stock: { $gte: item.quantity } },
+            { $inc: { stock: -item.quantity } }
+          );
+          if (stockResult.modifiedCount !== 1) {
+            for (const prior of decremented) await Product.updateOne({ _id: prior.productId }, { $inc: { stock: prior.quantity } });
+            order.status = "StockIssue";
+            await order.save();
+            console.error("Payment captured but stock conflict for order", order._id.toString());
+            return res.status(200).send("stock conflict recorded");
+          }
+          decremented.push({ productId: item.productId, quantity: item.quantity });
         }
 
         // Clear user's cart
