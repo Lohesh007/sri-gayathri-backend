@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
+const PendingRegistration = require("../models/PendingRegistration");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const sendEmail = require("../utils/sendEmail");
@@ -22,102 +24,60 @@ const generateToken = (id) =>
 router.post("/register", registrationLimiter, async (req, res) => {
   try {
     const { username, email, mobile, address, password } = req.body;
+    if (!username || !email || !mobile || !address || !password) return res.status(400).json({ message: "All fields required" });
+    if (typeof username !== "string" || username.trim().length < 2 || username.trim().length > 100) return res.status(400).json({ message: "Invalid username" });
+    if (typeof address !== "string" || address.trim().length < 5 || address.trim().length > 1000) return res.status(400).json({ message: "Invalid address" });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return res.status(400).json({ message: "Invalid email address format" });
+    if (!/^\d{10}$/.test(String(mobile))) return res.status(400).json({ message: "Mobile number must be a valid 10-digit number" });
+    if (typeof password !== "string" || password.length < 8 || password.length > 128) return res.status(400).json({ message: "Password must be 8–128 characters long" });
+    if (await User.findOne({ email: normalizedEmail })) return res.status(400).json({ message: "Email already registered" });
+    if (await User.findOne({ mobile })) return res.status(400).json({ message: "Mobile already registered" });
 
-    if (!username || !email || !mobile || !address || !password)
-      return res.status(400).json({ message: "All fields required" });
+    await PendingRegistration.deleteMany({ $or: [{ email: normalizedEmail }, { mobile }] });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(verificationToken).digest("hex");
+    await PendingRegistration.create({
+      username: username.trim(), email: normalizedEmail, mobile, address: address.trim(),
+      passwordHash, tokenHash, expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res.status(400).json({ message: "Invalid email address format" });
-
-    if (!/^\d{10}$/.test(mobile))
-      return res.status(400).json({ message: "Mobile number must be a valid 10-digit number" });
-
-    if (password.length < 8)
-      return res.status(400).json({ message: "Password must be at least 8 characters long" });
-
-    if (await User.findOne({ email }))
-      return res.status(400).json({ message: "Email already registered" });
-
-    if (await User.findOne({ mobile }))
-      return res.status(400).json({ message: "Mobile already registered" });
-
-    const token = jwt.sign(
-      { username, email, mobile, address, password },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
-
-    const rawFrontend = process.env.FRONTEND_URL || "https://sri-gayathri-fancy-religious.netlify.app";
-    const cleanFrontend = rawFrontend.includes("sri-gayathri-religious.netlify.app")
-      ? "https://sri-gayathri-fancy-religious.netlify.app"
-      : rawFrontend.replace(/\/$/, "");
-
-    const verifyURL = `${cleanFrontend}/verify-email/${token}`;
-    const emailHtml = getVerificationEmail(username, verifyURL);
-
-    await sendEmail(
-      email,
-      "Verify Your Email",
-      emailHtml
-    );
-
+    const frontend = (process.env.FRONTEND_URL || "https://sri-gayathri-fancy-religious.netlify.app").replace(/\/$/, "");
+    const verifyURL = `${frontend}/verify-email/${verificationToken}`;
+    await sendEmail(normalizedEmail, "Verify Your Email", getVerificationEmail(username.trim(), verifyURL));
     res.json({ message: "Verification email sent! Check your inbox." });
-
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    console.error("Registration error:", err.message);
+    res.status(500).json({ message: "Unable to start registration. Please try again." });
   }
 });
 
-
-// =====================================================
-// EMAIL VERIFICATION
-// =====================================================
-const ADMIN_LIST = [
-  { email: "loheshwaran311@gmail.com", mobile: "9597580853" },
-  { email: "srigayathri444@gmail.com", mobile: "9842004217" },
-  { email: "gayathrivijaya01@gmail.com", mobile: "9443821417" }
-];
-
 router.get("/verify-email/:token", async (req, res) => {
   try {
-    const decoded = jwt.verify(req.params.token, process.env.JWT_SECRET);
-    const { username, email, mobile, address, password } = decoded;
-
-    if (await User.findOne({ email })) {
-      return res.send("Email already verified. Please login.");
+    const tokenHash = crypto.createHash("sha256").update(req.params.token).digest("hex");
+    const pending = await PendingRegistration.findOne({ tokenHash, expiresAt: { $gt: new Date() } });
+    if (!pending) return res.status(400).send("Invalid or expired verification link.");
+    if (await User.findOne({ $or: [{ email: pending.email }, { mobile: pending.mobile }] })) {
+      await PendingRegistration.deleteOne({ _id: pending._id });
+      return res.send("Account already registered. Please login.");
     }
-
-    const isAdminUser = ADMIN_LIST.some(
-      adm => adm.email === email && adm.mobile === mobile
-    );
-
+    const isAdminUser = ADMIN_LIST.some((adm) => adm.email.toLowerCase() === pending.email && adm.mobile === pending.mobile);
     const user = new User({
-      username,
-      email,
-      mobile,
-      address,
-      password,
-      isVerified: true,
-      isAdmin: isAdminUser
+      username: pending.username, email: pending.email, mobile: pending.mobile,
+      address: pending.address, password: pending.passwordHash, isVerified: true, isAdmin: isAdminUser,
     });
-
+    user.passwordHashIsPreHashed = true;
     await user.save();
-
+    await PendingRegistration.deleteOne({ _id: pending._id });
     res.send("Email verified successfully! You can now login.");
-
   } catch (err) {
-    if (err.code === 11000) {
-      const field = Object.keys(err.keyPattern)[0];
-      return res.status(400).send(`${field.charAt(0).toUpperCase() + field.slice(1)} already registered. Please login.`);
-    }
+    if (err.code === 11000) return res.status(400).send("Email or mobile already registered. Please login.");
+    console.error("Verification error:", err.message);
     res.status(400).send("Invalid or expired verification link.");
   }
 });
 
-
-// =====================================================
-// LOGIN
-// =====================================================
 router.post("/login", loginLimiter, async (req, res) => {
   try {
     const { credential, password } = req.body;
