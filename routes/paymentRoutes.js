@@ -83,7 +83,7 @@ router.post("/verify", protect, async (req, res) => {
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
       return res.status(400).json({ message: "Invalid payment signature" });
     }
-    const pendingOrder = await Order.findOne({ razorpayOrderId, user: req.user._id, status: "PendingPayment" });
+    const pendingOrder = await Order.findOne({ razorpayOrderId: razorpay_order_id, user: req.user._id, status: "PendingPayment" });
     if (!pendingOrder) return res.status(400).json({ message: "Pending payment order not found" });
     return res.json({ message: "Payment verified" });
 
