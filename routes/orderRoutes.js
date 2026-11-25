@@ -38,14 +38,21 @@ router.post("/place", authenticate, async (req, res) => {
     hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
     const generatedSignature = hmac.digest("hex");
 
-    if (generatedSignature !== razorpay_signature) {
+    const suppliedSignature = Buffer.from(String(razorpay_signature || ""), "utf8");
+    const expectedSignature = Buffer.from(generatedSignature, "utf8");
+    if (suppliedSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(suppliedSignature, expectedSignature)) {
       return res.status(400).json({ message: "Invalid payment signature" });
     }
 
-    // 1. Check if the order was already completed by the webhook
+    // Payment must match a pending order created for the current account.
     const existingOrder = await Order.findOne({ razorpayOrderId: razorpay_order_id });
-    if (existingOrder && existingOrder.status !== "PendingPayment") {
-      return res.json({ message: "Order placed successfully", order: existingOrder });
+    if (!existingOrder || existingOrder.user.toString() !== req.user._id.toString()) {
+      return res.status(400).json({ message: "Payment order not found for this account" });
+    }
+    if (existingOrder.status !== "PendingPayment") {
+      if (existingOrder.razorpayPaymentId === razorpay_payment_id || existingOrder.status !== "PendingPayment") {
+        return res.json({ message: "Order placed successfully", order: existingOrder });
+      }
     }
 
     // 2. Check for double spending / payment replay attack
