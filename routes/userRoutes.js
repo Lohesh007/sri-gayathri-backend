@@ -200,11 +200,11 @@ router.get("/reset/:token", async (req, res) => {
 // =====================================================
 // RESET PASSWORD
 // =====================================================
-router.post("/reset/:token", async (req, res) => {
+router.post("/reset/:token", passwordResetLimiter, async (req, res) => {
   try {
     const { password } = req.body;
 
-    if (!password || password.length < 8) {
+    if (typeof password !== "string" || password.length < 8 || password.length > 128) {
       return res.status(400).json({ message: "Password must be at least 8 characters long" });
     }
 
