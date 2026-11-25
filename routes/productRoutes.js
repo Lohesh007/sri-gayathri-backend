@@ -11,8 +11,10 @@ const validateProduct = (data, partial = false) => {
   const required = ["name", "category", "subcategory", "image", "mrp", "price", "stock"];
   if (!partial && required.some((key) => data[key] === undefined || data[key] === null || data[key] === "")) return "Required product fields are missing";
   for (const key of ["name", "category", "subcategory", "image", "description"]) {
-    if (data[key] !== undefined && (typeof data[key] !== "string" || data[key].length > (key === "description" ? 5000 : 250))) return `Invalid ${key}`;
+    if (data[key] !== undefined && (typeof data[key] !== "string" || data[key].length > (key === "description" ? 5000 : key === "image" ? 2048 : 250))) return `Invalid ${key}`;
   }
+  if (data.image !== undefined && !data.image.startsWith("https://") && !data.image.startsWith("data:image/")) return "Product image must be HTTPS or an image data URL";
+  if (data.images !== undefined && data.images.some((url) => !url.startsWith("https://") && !url.startsWith("data:image/"))) return "Product images must be HTTPS or image data URLs";
   for (const key of ["mrp", "price", "stock"]) {
     if (data[key] !== undefined && (!Number.isFinite(Number(data[key])) || Number(data[key]) < 0 || (key === "stock" && !Number.isInteger(Number(data[key]))))) return `Invalid ${key}`;
   }
