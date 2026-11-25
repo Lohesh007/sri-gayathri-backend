@@ -94,40 +94,32 @@ router.post("/place", authenticate, async (req, res) => {
       )
       .join("");
 
-    // 3. Update the existing PendingPayment order, or create it if not found
-    let order = existingOrder;
-    if (order) {
-      order.status = "Pending";
-      order.razorpayPaymentId = razorpay_payment_id;
-      order.deliveryInstructions = deliveryInstructions || order.deliveryInstructions || "";
-      await order.save();
-    } else {
-      order = new Order({
-        user: req.user._id,
-        items: paidItems,
-        totalAmount,
-        customerName: req.user.username,
-        mobile: req.user.mobile,
-        address: req.user.address,
-        deliveryInstructions: deliveryInstructions || "",
-        status: "Pending",
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-      });
-      await order.save();
+    // Atomically claim this pending payment so webhook retries or concurrent requests cannot fulfill it twice.
+    const order = await Order.findOneAndUpdate(
+      { _id: existingOrder._id, status: "PendingPayment", user: req.user._id },
+      { $set: { status: "Pending", razorpayPaymentId: razorpay_payment_id, deliveryInstructions: deliveryInstructions || existingOrder.deliveryInstructions || "" } },
+      { new: true }
+    );
+    if (!order) {
+      const currentOrder = await Order.findById(existingOrder._id);
+      if (currentOrder && currentOrder.razorpayPaymentId === razorpay_payment_id) return res.json({ message: "Order placed successfully", order: currentOrder });
+      return res.status(409).json({ message: "Payment is already being processed" });
     }
 
-    // Decrement stock from the checkout snapshot (not current cart).
+    // Decrement stock from the immutable checkout snapshot with rollback on partial failure.
+    const decremented = [];
     for (const item of paidItems) {
       const stockUpdate = await Product.updateOne(
         { _id: item.productId, stock: { $gte: item.quantity } },
         { $inc: { stock: -item.quantity } }
       );
       if (stockUpdate.modifiedCount !== 1) {
+        for (const prior of decremented) await Product.updateOne({ _id: prior.productId }, { $inc: { stock: prior.quantity } });
         order.status = "StockIssue";
         await order.save();
         return res.status(409).json({ message: "Payment received, but stock changed. Please contact support.", orderId: order._id });
       }
+      decremented.push({ productId: item.productId, quantity: item.quantity });
     }
 
     // Prepare email HTML templates
