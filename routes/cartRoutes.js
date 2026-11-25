@@ -37,8 +37,20 @@ router.post("/add", authenticate, async (req, res) => {
 // Get cart for authenticated user
 router.get("/", authenticate, async (req, res) => {
   try {
-    const cart = await Cart.findOne({ user: req.user._id }).populate("items.productId", "stock price");
-    res.json(cart || { items: [] });
+    const cart = await Cart.findOne({ user: req.user._id });
+    if (!cart) return res.json({ items: [] });
+    // Refresh cart display values from current product records.
+    for (const item of cart.items) {
+      const product = await Product.findById(item.productId);
+      if (product) {
+        item.price = product.price;
+        item.name = product.name;
+        item.image = product.image;
+      }
+    }
+    await cart.save();
+    await cart.populate("items.productId", "stock price");
+    res.json(cart);
   } catch (error) {
     res.status(500).json({ message: "Failed to load cart" });
   }
