@@ -23,10 +23,18 @@ router.post("/create-order", protect, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    const totalAmount = cart.items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
+    const verifiedItems = [];
+    for (const cartItem of cart.items) {
+      const product = await Product.findById(cartItem.productId);
+      if (!product) return res.status(400).json({ message: "A cart product is no longer available" });
+      const quantity = Number(cartItem.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99 || quantity > product.stock) {
+        return res.status(400).json({ message: "Cart quantity is invalid or exceeds stock for " + product.name });
+      }
+      verifiedItems.push({ productId: product._id, name: product.name, price: product.price, image: product.image, quantity });
+    }
+    const totalAmount = verifiedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) return res.status(400).json({ message: "Invalid order total" });
 
     const options = {
       amount: totalAmount * 100,
@@ -39,7 +47,7 @@ router.post("/create-order", protect, async (req, res) => {
     // Save a PendingPayment Order in the database
     const pendingOrder = new Order({
       user: req.user._id,
-      items: cart.items,
+      items: verifiedItems,
       totalAmount,
       customerName: req.user.username,
       mobile: req.user.mobile,
@@ -88,15 +96,15 @@ router.post("/webhook", async (req, res) => {
     const signature = req.headers["x-razorpay-signature"];
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    // Verify webhook signature (if webhook secret is configured)
-    if (webhookSecret && signature) {
-      const shasum = crypto.createHmac("sha256", webhookSecret);
-      shasum.update(JSON.stringify(req.body));
-      const digest = shasum.digest("hex");
-
-      if (digest !== signature) {
-        return res.status(400).json({ message: "Invalid webhook signature" });
-      }
+    // Webhook verification is mandatory and uses the exact raw request bytes.
+    if (!webhookSecret || !signature || !req.rawBody) {
+      return res.status(401).json({ message: "Webhook verification is not configured" });
+    }
+    const digest = crypto.createHmac("sha256", webhookSecret).update(req.rawBody).digest("hex");
+    const supplied = Buffer.from(signature, "utf8");
+    const expected = Buffer.from(digest, "utf8");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      return res.status(400).json({ message: "Invalid webhook signature" });
     }
 
     const event = req.body.event;
